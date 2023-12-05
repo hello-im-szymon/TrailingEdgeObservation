@@ -9,103 +9,68 @@
 //
 //===----------------------------------------------------------------------===//
 
-
-//@_silgen_name("_swift_observation_lock_size")
-//func _lockSize() -> Int
-//
-//@_silgen_name("_swift_observation_lock_init")
-//func _lockInit(_: UnsafeRawPointer)
-//
-//@_silgen_name("_swift_observation_lock_lock")
-//func _lockLock(_: UnsafeRawPointer)
-//
-//@_silgen_name("_swift_observation_lock_unlock")
-//func _lockUnlock(_: UnsafeRawPointer)
-
-//@available(SwiftStdlib 5.9, *)
-//internal struct _ManagedCriticalState<State> {
-//  final private class LockedBuffer: ManagedBuffer<State, UnsafeRawPointer> { }
-//
-//  private let buffer: ManagedBuffer<State, UnsafeRawPointer>
-//
-//  internal init(_ buffer: ManagedBuffer<State, UnsafeRawPointer>) {
-//    self.buffer = buffer
-//  }
-//  
-//  internal init(_ initial: State) {
-//    let roundedSize = (_lockSize() + MemoryLayout<UnsafeRawPointer>.size - 1) / MemoryLayout<UnsafeRawPointer>.size 
-//    self.init(LockedBuffer.create(minimumCapacity: Swift.max(roundedSize, 1)) { buffer in
-//      buffer.withUnsafeMutablePointerToElements { _lockInit(UnsafeRawPointer($0)) }
-//      return initial
-//    })
-//  }
-//
-//  internal func withCriticalRegion<R>(
-//    _ critical: (inout State) throws -> R
-//  ) rethrows -> R {
-//    try buffer.withUnsafeMutablePointers { header, lock in
-//      _lockLock(UnsafeRawPointer(lock))
-//      defer {
-//        _lockUnlock(UnsafeRawPointer(lock))
-//      }
-//      return try critical(&header.pointee)
-//    }
-//  }
-//}
-//
-//@available(SwiftStdlib 5.9, *)
-//extension _ManagedCriticalState: @unchecked Sendable where State: Sendable { }
-//
-//@available(SwiftStdlib 5.9, *)
-//extension _ManagedCriticalState: Identifiable {
-//  internal var id: ObjectIdentifier {
-//    ObjectIdentifier(buffer)
-//  }
-//}
-
 import os.lock
 
-internal class _ManagedCriticalState<State> {
-//  final private class LockedBuffer: ManagedBuffer<State, UnsafeRawPointer> { }
+internal struct _ManagedCriticalState<State> {
 
-//  private let buffer: ManagedBuffer<State, UnsafeRawPointer>
-    let lock: OSAllocatedUnfairLock<State>
+    private let lock: Lock
+    final private class LockedBuffer: ManagedBuffer<State, UnsafeRawPointer> { }
 
-//  internal init(_ buffer: ManagedBuffer<State, UnsafeRawPointer>) {
-//    self.buffer = buffer
-//  }
+    private let buffer: ManagedBuffer<State, UnsafeRawPointer>
 
-  internal init(_ initial: State) {
-      lock = OSAllocatedUnfairLock(initialState: initial)
-//    let roundedSize = (_lockSize() + MemoryLayout<UnsafeRawPointer>.size - 1) / MemoryLayout<UnsafeRawPointer>.size
-//    self.init(LockedBuffer.create(minimumCapacity: Swift.max(roundedSize, 1)) { buffer in
-//      buffer.withUnsafeMutablePointerToElements { _lockInit(UnsafeRawPointer($0)) }
-//      return initial
-//    })
-  }
+    internal init(_ buffer: ManagedBuffer<State, UnsafeRawPointer>) {
+        self.buffer = buffer
+        self.lock = Lock()
+    }
 
-  internal func withCriticalRegion<R>(
-    _ critical: (inout State) throws -> R
-  ) rethrows -> R {
-//    try buffer.withUnsafeMutablePointers { header, lock in
-//      _lockLock(UnsafeRawPointer(lock))
-//      defer {
-//        _lockUnlock(UnsafeRawPointer(lock))
-//      }
-//      return try critical(&header.pointee)
-//    }
-      return try lock.withLock { state in
-          try critical(&state)
-      }
-  }
+    internal init(_ initial: State) {
+        let roundedSize = (MemoryLayout<UnsafeRawPointer>.size - 1) / MemoryLayout<UnsafeRawPointer>.size
+        self.init(LockedBuffer.create(minimumCapacity: Swift.max(roundedSize, 1)) { buffer in
+            return initial
+        })
+    }
+
+    internal func withCriticalRegion<R>(
+        _ critical: (inout State) throws -> R
+    ) rethrows -> R {
+        try buffer.withUnsafeMutablePointers { header, _ in
+            self.lock.lock()
+            defer {
+                self.lock.unlock()
+            }
+            return try critical(&header.pointee)
+        }
+    }
 }
 
-//@available(SwiftStdlib 5.9, *)
 extension _ManagedCriticalState: @unchecked Sendable where State: Sendable { }
 
-//@available(SwiftStdlib 5.9, *)
 extension _ManagedCriticalState: Identifiable {
-  internal var id: ObjectIdentifier {
-    ObjectIdentifier(self)
-  }
+    internal var id: ObjectIdentifier {
+        ObjectIdentifier(buffer)
+    }
+}
+
+private extension _ManagedCriticalState {
+    final class Lock {
+        private let _lock: os_unfair_lock_t
+
+        init() {
+            self._lock = .allocate(capacity: 1)
+            self._lock.initialize(to: os_unfair_lock())
+        }
+
+        func lock() {
+            os_unfair_lock_lock(_lock)
+        }
+
+        func unlock() {
+            os_unfair_lock_unlock(_lock)
+        }
+
+        deinit {
+            self._lock.deinitialize(count: 1)
+            self._lock.deallocate()
+        }
+    }
 }

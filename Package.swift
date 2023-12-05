@@ -6,7 +6,7 @@ import CompilerPluginSupport
 
 let package = Package(
     name: "TrailingEdgeObservation",
-    platforms: [.iOS(.v16), .tvOS(.v16), .watchOS(.v9), .macCatalyst(.v16), .macOS(.v10_15)],
+    platforms: [.iOS(.v13), .tvOS(.v13), .watchOS(.v7), .macCatalyst(.v13), .macOS(.v10_15)],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
